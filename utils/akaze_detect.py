@@ -1,0 +1,65 @@
+import cv2
+import numpy as np
+
+def detect_akaze(image):
+    """
+    @brief AKAZE algoritması ile görüntü manipülasyon tespiti yapar
+    @param image Analiz edilecek görüntü (numpy array)
+    @return result dict: sonuç, keypoint sayısı, görüntü
+    """
+    
+    # Görüntüyü griye çevir
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    
+    # AKAZE oluştur
+    akaze = cv2.AKAZE_create()
+    
+    # Keypoint ve descriptor bul
+    keypoints, descriptors = akaze.detectAndCompute(gray, None)
+    
+    # Keypoint sayısına göre karar ver
+    keypoint_count = len(keypoints)
+    
+    # Görüntüyü keypoint ile çiz
+    output_image = cv2.drawKeypoints(
+        image.copy(),
+        keypoints,
+        None,
+        flags=cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS
+    )
+    
+    # Eşik değeri
+    if descriptors is not None:
+        # Descriptor varyansı hesapla
+        variance = np.var(descriptors.astype(np.float32))
+        
+        # Keypoint yoğunluk analizi
+        if keypoint_count > 0:
+            h, w = gray.shape
+            density = keypoint_count / (h * w)
+            
+            if variance > 0.15 or density > 0.01:
+                status = "⚠️ Manipüle Edilmiş"
+                manipulated = True
+            else:
+                status = "✅ Orijinal"
+                manipulated = False
+        else:
+            status = "❓ Belirlenemedi"
+            manipulated = False
+            variance = 0
+            density = 0
+    else:
+        status = "❓ Belirlenemedi"
+        manipulated = False
+        variance = 0
+        density = 0
+    
+    return {
+        "algorithm": "AKAZE",
+        "status": status,
+        "manipulated": manipulated,
+        "keypoint_count": keypoint_count,
+        "variance": round(float(variance), 4),
+        "output_image": output_image
+    }
