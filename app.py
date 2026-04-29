@@ -407,7 +407,7 @@ st.sidebar.markdown("""
 
 page = st.sidebar.radio(
     "",
-    ["Ana Sayfa", "Analiz"],
+    ["Ana Sayfa", "Algoritma Analiz", "AI Analiz"],
     label_visibility="collapsed"
 )
 
@@ -420,6 +420,9 @@ st.sidebar.markdown("""
 if page == "Ana Sayfa":
     from _pages.home import show
     show()
-elif page == "Analiz":
+elif page == "Algoritma Analiz":
     from _pages.analysis import show
+    show()
+elif page == "AI Analiz":
+    from _pages.ai_analysis import show
     show()
