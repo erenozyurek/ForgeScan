@@ -1,120 +1,92 @@
 import cv2
 import numpy as np
 
-
 def _create_detector():
-    """Try to create SURF; if unavailable, try SIFT then ORB as fallbacks.
-    Returns (detector, name) or (None, None) if none available.
-    """
-    # SURF (requires opencv-contrib)
-    try:
-        surf = cv2.xfeatures2d.SURF_create(400)
-        return surf, "SURF"
-    except Exception:
-        pass
-
-    # SIFT (may be available in many opencv builds)
+    """Öncelikle SIFT'i dener, bulamazsa ORB'ye geçer."""
     try:
         sift = cv2.SIFT_create()
         return sift, "SIFT"
     except Exception:
         pass
-
-    # ORB as a last-resort fallback
     try:
         orb = cv2.ORB_create(nfeatures=1000)
         return orb, "ORB"
     except Exception:
         pass
-
     return None, None
 
-
-def detect_surf(image):
-    """
-    @brief SURF (ve/veya fallback) ile görüntü manipülasyon tespiti yapar
-    @param image Analiz edilecek görüntü (numpy array)
-    @return result dict: sonuç, keypoint sayısı, görüntü ve kullanılan alg.
-    """
-
-    requested_algorithm = "SURF"
-
-    # Güvenli girdi kontrolü
+def detect_forgery_feature_based(image):
     if image is None:
-        return {
-            "algorithm": requested_algorithm,
-            "used_algorithm": None,
-            "available": False,
-            "status": "❌ Geçersiz görüntü (None)",
-            "manipulated": False,
-            "keypoint_count": 0,
-            "variance": 0,
-            "output_image": None,
-            "suggested_command": "pip install opencv-contrib-python"
-        }
+        return {"status": "❌ Geçersiz görüntü", "manipulated": False}
 
-    # Görüntüyü griye çevir
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-
     detector, used_algo = _create_detector()
 
     if detector is None:
-        # Hem SURF hem de fallback bulunamadı
+        return {"status": "❌ Detector bulunamadı", "manipulated": False}
+
+    keypoints, descriptors = detector.detectAndCompute(gray, None)
+    
+    if descriptors is None or len(keypoints) < 10:
+        # Puan bulutunu çizip dönelim
+        output_image = cv2.drawKeypoints(image.copy(), keypoints or [], None, flags=cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
         return {
-            "algorithm": requested_algorithm,
-            "used_algorithm": None,
-            "available": False,
-            "status": "❌ SURF ve fallback detectorlar bulunamadı",
+            "used_algorithm": used_algo,
+            "status": "✅ Orijinal (Yeterli eşleşme noktası yok)",
             "manipulated": False,
-            "keypoint_count": 0,
-            "variance": 0,
-            "output_image": image.copy(),
-            "suggested_command": "pip install opencv-contrib-python"
+            "keypoint_count": len(keypoints) if keypoints else 0,
+            "suspicious_match_count": 0,
+            "variance": "-",
+            "output_image": output_image
         }
 
-    # Keypoint ve descriptor bul
-    keypoints, descriptors = detector.detectAndCompute(gray, None)
-    keypoints = keypoints or []
-    keypoint_count = len(keypoints)
+    # Öncelikle "baloncuklu" yapıyı, yani puan bulutunu çizelim.
+    point_cloud_image = cv2.drawKeypoints(image.copy(), keypoints, None, flags=cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
 
-    # Görüntüyü keypoint ile çiz
-    output_image = cv2.drawKeypoints(
-        image.copy(),
-        keypoints,
-        None,
-        flags=cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS
-    )
+    norm_type = cv2.NORM_HAMMING if used_algo == "ORB" else cv2.NORM_L2
+    matcher = cv2.BFMatcher(norm_type, crossCheck=False)
+    
+    # K=3 MANTIĞI: m=kendisi, n=kopya adayı, p=alakasız nokta
+    matches = matcher.knnMatch(descriptors, descriptors, k=3)
 
-    # Descriptor analizi
-    if descriptors is not None:
-        try:
-            descriptors_f = descriptors.astype(np.float32)
-        except Exception:
-            descriptors_f = np.array(descriptors, dtype=np.float32)
+    good_matches = []
+    # Lowe's Ratio Test
+    for match in matches:
+        if len(match) == 3:
+            m, n, p = match
+            
+            # Kopya adayı (n), alakasız noktadan (p) bariz şekilde daha iyi bir eşleşmeyse
+            if n.distance < 0.75 * p.distance:
+                pt1 = np.array(keypoints[n.queryIdx].pt)
+                pt2 = np.array(keypoints[n.trainIdx].pt)
+                
+                # Fiziksel piksel mesafesini ölç
+                dist = np.linalg.norm(pt1 - pt2)
+                
+                # Eğer aynı doku 50 pikselden daha uzak bir yerde de varsa, kopyadır!
+                if dist > 50.0:
+                    good_matches.append(n)
 
-        variance = float(np.var(descriptors_f))
+    # Baloncuklu resmin üzerine kopyalama çizgilerini çizeceğiz.
+    output_image = point_cloud_image.copy() 
+    
+    for match in good_matches:
+        pt1 = tuple(map(int, keypoints[match.queryIdx].pt))
+        pt2 = tuple(map(int, keypoints[match.trainIdx].pt))
+        cv2.line(output_image, pt1, pt2, (0, 0, 255), 2) # Kırmızı çizgi ile kopyalanan yerleri bağla
+        cv2.circle(output_image, pt1, 5, (0, 255, 0), -1)
+        cv2.circle(output_image, pt2, 5, (0, 255, 0), -1)
 
-        # Basit heuristic eşikleri: fallback'a göre farklı davran
-        if used_algo == "SURF":
-            manipulated = variance > 0.02
-        elif used_algo == "SIFT":
-            manipulated = variance > 1500
-        else:  # ORB
-            manipulated = variance > 1200
-
-        status = "⚠️ Manipüle Edilmiş" if manipulated else "✅ Orijinal"
-    else:
-        variance = 0.0
-        manipulated = False
-        status = "❓ Belirlenemedi"
+    match_count = len(good_matches)
+    manipulated = match_count > 10
+    status = "⚠️ Manipüle Edilmiş (Kopyala-Yapıştır Tespit Edildi)" if manipulated else "✅ Orijinal"
 
     return {
-        "algorithm": requested_algorithm,
         "used_algorithm": used_algo,
-        "available": True,
         "status": status,
         "manipulated": manipulated,
-        "keypoint_count": keypoint_count,
-        "variance": round(float(variance), 4),
+        "keypoint_count": len(keypoints),
+        "suspicious_match_count": match_count,
+        "variance": "-",
         "output_image": output_image
     }

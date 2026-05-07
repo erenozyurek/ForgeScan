@@ -4,7 +4,7 @@ import numpy as np
 from PIL import Image
 
 from utils.sift_detect import detect_sift
-from utils.surf_detect import detect_surf
+from utils.surf_detect import detect_forgery_feature_based
 from utils.akaze_detect import detect_akaze
 from utils.orb_detect import detect_orb
 
@@ -32,7 +32,9 @@ def show():
 
         c1, c2 = st.columns([1, 1])
         with c1:
-            st.image(pil_image, caption="Yüklenen Görüntü", use_container_width=True)
+            # DEĞİŞİKLİK BURADA: use_container_width=True yerine sabit width=350 verdik.
+            # Boyutu gözüne göre 300, 400 gibi değerlerle de ayarlayabilirsin.
+            st.image(pil_image, caption="Yüklenen Görüntü", width=350)
         with c2:
             fmt = pil_image.format if pil_image.format else uploaded_file.type
             kb = uploaded_file.size / 1024
@@ -52,7 +54,7 @@ def show():
         with c1:
             use_sift = st.checkbox("SIFT", value=True)
         with c2:
-            use_surf = st.checkbox("SURF", value=True)
+            use_surf = st.checkbox("SURF", value=True) 
         with c3:
             use_akaze = st.checkbox("AKAZE", value=True)
         with c4:
@@ -67,9 +69,9 @@ def show():
                     results["SIFT"] = detect_sift(image)
                 if use_surf:
                     try:
-                        results["SURF"] = detect_surf(image)
-                    except Exception:
-                        st.warning("SURF kullanılamadı — opencv-contrib-python gerekli.")
+                        results["SURF"] = detect_forgery_feature_based(image)
+                    except Exception as e:
+                        st.error(f"Klonlama tespiti çalışırken hata oluştu: {e}")
                 if use_akaze:
                     results["AKAZE"] = detect_akaze(image)
                 if use_orb:
@@ -79,7 +81,7 @@ def show():
                 st.markdown('<hr class="fs-hr">', unsafe_allow_html=True)
                 st.markdown('<div class="fs-section">Sonuçlar</div>', unsafe_allow_html=True)
 
-                manipulated_count = sum(1 for r in results.values() if r["manipulated"])
+                manipulated_count = sum(1 for r in results.values() if r.get("manipulated", False))
                 total_count = len(results)
                 clean_count = total_count - manipulated_count
 
@@ -104,7 +106,6 @@ def show():
 
                 st.markdown("<br>", unsafe_allow_html=True)
 
-                # Genel karar
                 if manipulated_count >= total_count / 2:
                     st.markdown("""<div class="fs-verdict-warn">
                         <div class="fs-verdict-title">⚠ Bu görüntü manipüle edilmiş olabilir</div>
@@ -122,27 +123,32 @@ def show():
                 for algo, result in results.items():
                     c1, c2 = st.columns([1, 1])
                     with c1:
-                        out_rgb = cv2.cvtColor(result["output_image"], cv2.COLOR_BGR2RGB)
-                        st.image(out_rgb, caption=f"{algo} — Keypoint Haritası", use_container_width=True)
+                        if "output_image" in result and result["output_image"] is not None:
+                            out_rgb = cv2.cvtColor(result["output_image"], cv2.COLOR_BGR2RGB)
+                            # EĞER analiz sonuçlarındaki fotoğrafların da küçük olmasını istersen
+                            # buradaki use_container_width=True kısmını da width=350 olarak değiştirebilirsin.
+                            st.image(out_rgb, caption=f"{algo} — Analiz Haritası", use_container_width=True)
+                        else:
+                            st.warning("Görsel oluşturulamadı.")
                     with c2:
-                        badge_cls = "fs-status-warn" if result["manipulated"] else "fs-status-ok"
-                        prog_cls = "fs-progress-warn" if result["manipulated"] else "fs-progress-ok"
-                        prog_val = 75 if result["manipulated"] else 20
+                        badge_cls = "fs-status-warn" if result.get("manipulated", False) else "fs-status-ok"
+                        prog_cls = "fs-progress-warn" if result.get("manipulated", False) else "fs-progress-ok"
+                        prog_val = 75 if result.get("manipulated", False) else 20
 
-                        extra = ""
-                        if "avg_response" in result:
-                            extra = f'<div class="fs-info-row"><span class="fs-label">Ort. Response</span><span class="fs-value">{result["avg_response"]}</span></div>'
+                        keypoints = result.get('keypoint_count', '-')
+                        variance = result.get('variance', '-')
+                        suspicious = result.get('suspicious_match_count', '-')
 
                         st.markdown(f"""<div class="fs-card">
                             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
                                 <span class="fs-card-title" style="margin:0">{algo}</span>
-                                <span class="{badge_cls}">{result['status']}</span>
+                                <span class="{badge_cls}">{result.get('status', 'Bilinmiyor')}</span>
                             </div>
                             <div class="fs-progress"><div class="{prog_cls}" style="width:{prog_val}%"></div></div>
                             <div style="margin-top:12px;">
-                                <div class="fs-info-row"><span class="fs-label">Keypoint</span><span class="fs-value">{result['keypoint_count']}</span></div>
-                                <div class="fs-info-row"><span class="fs-label">Varyans</span><span class="fs-value">{result['variance']}</span></div>
-                                {extra}
+                                <div class="fs-info-row"><span class="fs-label">Keypoint</span><span class="fs-value">{keypoints}</span></div>
+                                <div class="fs-info-row"><span class="fs-label">Varyans</span><span class="fs-value">{variance}</span></div>
+                                <div class="fs-info-row"><span class="fs-label">Şüpheli Eşleşme (Kopya)</span><span class="fs-value" style="color:#ef4444; font-weight:bold;">{suspicious}</span></div>
                             </div>
                         </div>""", unsafe_allow_html=True)
                     st.markdown("<br>", unsafe_allow_html=True)
