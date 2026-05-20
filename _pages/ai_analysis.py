@@ -6,7 +6,7 @@ from PIL import Image
 import tensorflow as tf
 
 # Ayarlar
-MODEL_PATH = r"C:\Users\Ercüment Kocaoğlu\Source\Repos\ForgeScan\_pages\model_casia_ela.h5"
+MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "model_casia_ela.h5")
 IMAGE_SIZE = (128, 128)
 
 def run_ela(image, quality=90):
@@ -66,11 +66,11 @@ def show():
                     
                     # Tahmin yap
                     prediction = model.predict(x)
-                    class_idx = np.argmax(prediction[0])
-                    confidence = prediction[0][class_idx] * 100
+                    # class 0 = orijinal, class 1 = sahte
+                    original_confidence = prediction[0][0] * 100
                     
                     st.divider()
-                    if class_idx == 1:
-                        st.error(f"SONUÇ: MANİPÜLE EDİLMİŞ (SAHTE) - Güven Oranı: %{confidence:.2f}")
+                    if original_confidence >= 70:
+                        st.success(f"SONUÇ: ORİJİNAL (GERÇEK) - Güven Oranı: %{original_confidence:.2f}")
                     else:
-                        st.success(f"SONUÇ: ORİJİNAL (GERÇEK) - Güven Oranı: %{confidence:.2f}")
+                        st.error(f"SONUÇ: MANİPÜLE EDİLMİŞ (SAHTE) - Güven Oranı: %{(100 - original_confidence):.2f}")
